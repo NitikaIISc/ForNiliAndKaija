@@ -1,0 +1,133 @@
+####################### towards an adjacency matrix #############
+## converting to a df and than data.table after fitlering
+#now done above: AllBackStacked_All=moveStack(unstacked_All) #splitting _Alls data into individuals 
+#too heavy but works: plot(AllBackStacked_All,  lwd=2, xlab="location_long", ylab="location_lat")
+
+##Nitika - 
+############    pruned dataset within Israel to move object
+head(Dataset_AllF)
+library(moveVis)
+library(move)
+BackStacked_All = df2move(Dataset_AllF,
+                          proj = CRS(projection(AllBackStacked_All)), 
+                          x = "coords.x1", y = "coords.x2", time = "timestamps", track_id = "trackId")
+
+Dataset_AllF_ltraj=move2ade(BackStacked_All)
+Dataset_AllF=as.data.frame(BackStacked_All) #converting to a dataset F for filtered
+Dataset_AllF=data.table::setDT(Dataset_AllF,keep.rownames=T)#and now to a data.table
+
+## renaming\adding columns
+Dataset_AllF$ID=Dataset_AllF$trackId
+Dataset_AllF$location_long1=Dataset_AllF$coords.x1
+Dataset_AllF$location_lat1=Dataset_AllF$coords.x2
+
+## adding coordinates with a metric value ##### #
+## first setting the same coordinate system as in movebank
+projection(BackStacked_All)#this was the original data projection from movebank
+Dataset_AllF_wgs=Dataset_AllF;
+coordinates(Dataset_AllF_wgs)<-~coords.x1+coords.x2
+proj4string(Dataset_AllF_wgs)<-CRS(projection(BackStacked_All))
+
+#proj4string(x) <-CRS("+proj=utm +zone=10+datum=WGS84")
+#newData <- spTransform(x, CRS("+init=epsg:4238"))
+utmS <- '+proj=utm +zone=36 +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs' #south, but most points are in the north
+utmN <- '+proj=utm +zone=36        +ellps=WGS84 +datum=WGS84 +units=m +no_defs'  #north
+
+## converting to UTM36North, but note that not all points are within, just the majority
+Dataset_AllF_utmN <- spTransform(Dataset_AllF_wgs, CRS(utmN))
+head(coordinates(Dataset_AllF_utmN))#now the lat long are in metric
+# just plotting the new dataset to see the locations look fine: plot(Dataset_AllF_utmN,col='blue')
+
+## appending the new coordinates in easting northing- for calculating distance UTM locally
+Dataset_AllF$Easting=coordinates(Dataset_AllF_utmN)[,1]
+Dataset_AllF$Northing=coordinates(Dataset_AllF_utmN)[,2]
+
+
+#View(Dataset_AllF)
+
+##spatsoc- timegroups
+start_time <- Sys.time()
+## using spatsoc for groupping into time groups
+
+
+
+
+
+
+
+
+######      Sensitivity analysis for non-flying distance threshold    ############
+
+#TimeThreshold = c('20 minutes','30 minutes')
+
+library(spatsoc)
+#for(T in 1:length(TimeThreshold)){
+
+##spatsoc- timegroups
+start_time <- Sys.time()
+## using spatsoc for groupping into time groups
+#class(Dataset_AllF$time)
+
+group_times(Dataset_AllF, datetime = 'timestamps', threshold = TimeThreshold) 
+##Nitika - group all datapoints that fall within 10 minutes of each other 
+##      - timestamp is date time format 'POSIXct' as required by spatsoc
+##      - group_times returns the input DT appended with a timegroup column and additional temporal grouping columns to help investigate, troubleshoot and interpret the timegroup.
+
+## using spatsoc for grouping into spatial groups with the metric values --- using northing and easting
+#Dataset_AllF=
+
+# for (D in 1:length(DistThreshold)){  
+#group_pts(Dataset_AllF, threshold = DistThreshold[D], id = 'ID', coords = c('Northing', 'Easting'), timegroup = 'timegroup')
+group_pts(Dataset_AllF, threshold = DistThreshold, id = 'ID', coords = c('Northing', 'Easting'), timegroup = 'timegroup')
+
+#use group_lines instead??
+
+##Nitika  - The timegroup argument is optional, but recommended to pair with group_times. 
+#The intended framework is to group rows temporally with group_times then 
+#spatially with group_pts (or group_lines, group_polys)
+
+#group_pts returns the input DT appended with a group column.
+
+#This column represents the spatial (and if timegroup was provided - 
+#spatiotemporal) group. As with the other grouping functions, 
+#the actual value of group is arbitrary and represents the identity of a 
+#given group where 1 or more individuals are assigned to a group. 
+#If the data was reordered, the group may change, but the contents of each group would not.
+
+end_time <- Sys.time()
+
+end_time - start_time
+#
+
+####Removing pre-existing calculated interactions at previous distance threshold  ####
+
+rm('SRIlongform')
+rm('CoocurCountr')
+rm('SimlDataPntCnt')
+
+##### manual distance calculation and SN construction #####
+SimlDataPntCnt   = expand.grid(unique(as.character(Dataset_AllF$ID)),unique(as.character(Dataset_AllF$ID)))
+#a long form of all possible dyads to count interaction
+#expand.grid = Create a data frame from all combinations of the supplied vectors or factors.
+
+SimlDataPntCnt$counter=0;names(SimlDataPntCnt)=c('ID','ID2','counter') ##setting empty matrix of dimensions pf ID1*ID2
+##counter is to see if they co-occur
+
+
+CoocurCountr = SimlDataPntCnt
+#a long form of all possible dyads to count intervals both were at the same timegroup
+#creating empty matrix for SRI
+SRIlongform=CoocurCountr;names(SRIlongform)[3]='SRI'#--- exhaustive pair-wise
+subset(SRIlongform, SRI != 0)
+
+#if (CountTwice) Add=0.5 else Add=1
+start_time <- Sys.time()
+
+source('C:/Users/nitik/Box Sync/Manuscript4_Vulture Data/VulturesCodes-master/MyCodes/createDirectedMatrices.R')
+matrices = createDirectedMatrices(Dataset_AllF, DistThreshold)
+end_time <- Sys.time()
+
+end_time - start_time
+
+SimlDataPntCnt = matrices[[1]]
+CoocurCountr = matrices [[2]]
